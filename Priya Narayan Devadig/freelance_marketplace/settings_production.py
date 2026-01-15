@@ -10,12 +10,12 @@ DEBUG = False
 
 # Allowed hosts - update with your domain
 ALLOWED_HOSTS = [
-    'localhost',
-    '127.0.0.1',
-    '.herokuapp.com',
-    '.render.com',
-    'your-domain.com',  # Replace with your actual domain
+    "talentlink-backend-pkr9.onrender.com",
+    ".onrender.com",
+    "localhost",
+    "127.0.0.1",
 ]
+
 
 # Database - PostgreSQL for production
 DATABASES = {
