@@ -3,8 +3,12 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from django.db.models import Q
+from django.contrib.auth import get_user_model
 from .models import Project
 from .serializers import ProjectSerializer, ProjectCreateSerializer
+from accounts.notifications import notify_project_posted
+
+User = get_user_model()
 
 
 class ProjectListCreateView(generics.ListCreateAPIView):
@@ -58,7 +62,10 @@ class ProjectListCreateView(generics.ListCreateAPIView):
         return queryset
 
     def perform_create(self, serializer):
-        serializer.save(client=self.request.user)
+        project = serializer.save(client=self.request.user)
+        
+        # Notify relevant freelancers about the new project
+        notify_project_posted(project)
 
 
 class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):

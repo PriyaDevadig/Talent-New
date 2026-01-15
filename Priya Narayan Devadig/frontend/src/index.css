@@ -83,6 +83,7 @@ body {
     color: var(--text-primary);
     line-height: 1.6;
     font-size: 16px;
+    padding-top: 70px;
 }
 
 code {
@@ -98,18 +99,40 @@ code {
     max-width: 1280px;
     margin: 0 auto;
     padding: var(--spacing-xl) var(--spacing-lg);
+    margin-left: 260px;
+    transition: margin-left 0.3s ease;
+}
+
+/* Center container for public pages (no sidebar) */
+.container.centered {
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .container-sm {
     max-width: 640px;
     margin: 0 auto;
     padding: var(--spacing-xl) var(--spacing-lg);
+    margin-left: 260px;
+    transition: margin-left 0.3s ease;
+}
+
+.container-sm.centered {
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .container-md {
     max-width: 960px;
     margin: 0 auto;
     padding: var(--spacing-xl) var(--spacing-lg);
+    margin-left: 260px;
+    transition: margin-left 0.3s ease;
+}
+
+.container-md.centered {
+    margin-left: auto;
+    margin-right: auto;
 }
 
 /* ===== NAVBAR ===== */
@@ -647,6 +670,7 @@ a:hover {
     .container-sm,
     .container-md {
         padding: var(--spacing-lg) var(--spacing-md);
+        margin-left: 0;
     }
 
     h1 {

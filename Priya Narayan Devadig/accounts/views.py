@@ -4,14 +4,14 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import User, Profile, Skill
 from .serializers import (
-    UserRegistrationSerializer, UserLoginSerializer, 
+    UserCreateSerializer, LoginSerializer, 
     UserSerializer, ProfileSerializer, SkillSerializer, UserSkillSerializer
 )
 
 
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
-    serializer_class = UserRegistrationSerializer
+    serializer_class = UserCreateSerializer
     permission_classes = [AllowAny]
 
     def create(self, request, *args, **kwargs):
@@ -28,7 +28,7 @@ class RegisterView(generics.CreateAPIView):
 
 
 class LoginView(generics.GenericAPIView):
-    serializer_class = UserLoginSerializer
+    serializer_class = LoginSerializer
     permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
@@ -72,4 +72,22 @@ class UserSkillsView(generics.ListCreateAPIView):
 class UserDetailView(generics.RetrieveAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
+    permission_classes = [AllowAny]
+
+
+class UserListView(generics.ListAPIView):
+    """List all users for messaging purposes"""
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]  # Re-enable authentication
+    
+    def get_queryset(self):
+        # Return all users except the current user
+        return User.objects.exclude(id=self.request.user.id).order_by('first_name', 'last_name')
+
+
+class SkillListView(generics.ListAPIView):
+    """List all available skills"""
+    queryset = Skill.objects.all()
+    serializer_class = SkillSerializer
     permission_classes = [AllowAny]

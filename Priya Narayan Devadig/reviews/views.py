@@ -6,6 +6,7 @@ from django.db import models
 from django.db.models import Avg
 from .models import Review
 from .serializers import ReviewSerializer, ReviewCreateSerializer
+from accounts.notifications import notify_review_received
 
 
 class ReviewListCreateView(generics.ListCreateAPIView):
@@ -53,7 +54,13 @@ class ReviewListCreateView(generics.ListCreateAPIView):
         else:
             reviewee = contract.client
         
-        serializer.save(reviewer=self.request.user, reviewee=reviewee)
+        # Save the review
+        review = serializer.save(reviewer=self.request.user, reviewee=reviewee)
+        
+        # Send notification to the reviewee
+        notify_review_received(reviewee, review)
+        
+        return review
 
 
 class ReviewDetailView(generics.RetrieveAPIView):

@@ -2,9 +2,21 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    path('', views.MessageListView.as_view(), name='message-list-create'),
-    path('<int:pk>/', views.MessageDetailView.as_view(), name='message-detail'),
+    # Conversation management
     path('conversations/', views.get_conversations, name='conversations'),
-    path('<int:pk>/read/', views.mark_as_read, name='mark-as-read'),
-    path('conversation/<int:partner_id>/read/', views.mark_conversation_as_read, name='mark-conversation-read'),
+    path('conversations/<int:conversation_id>/', views.get_conversation_messages, name='conversation-messages'),
+    path('conversations/<int:conversation_id>/read/', views.mark_conversation_read, name='mark-conversation-read'),
+    path('conversations/<int:conversation_id>/clear/', views.clear_conversation, name='clear-conversation'),
+    
+    # Message sending
+    path('', views.send_message, name='send-message'),
+    path('start-conversation/', views.start_conversation, name='start-conversation'),
+    
+    # Real-time features
+    path('long-poll/<int:conversation_id>/', views.long_poll_messages, name='long-poll-messages'),
+    path('unread-count/', views.get_unread_count, name='unread-count'),
+    
+    # Additional features
+    path('typing/<int:conversation_id>/', views.typing_indicator, name='typing-indicator'),
+    path('search/', views.search_messages, name='search-messages'),
 ]

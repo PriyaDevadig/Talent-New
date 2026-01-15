@@ -1,269 +1,524 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import './Messages.css';
 
 const Messages = () => {
-    const { currentUser } = useAuth();
+    const { currentUser: user } = useAuth();
     const [conversations, setConversations] = useState([]);
-    const [selectedPartner, setSelectedPartner] = useState(null);
+    const [selectedConversation, setSelectedConversation] = useState(null);
     const [messages, setMessages] = useState([]);
-    const [newMessage, setNewMessage] = useState({ subject: '', content: '' });
+    const [newMessage, setNewMessage] = useState('');
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [showStartConversation, setShowStartConversation] = useState(false);
+    const [users, setUsers] = useState([]);
+    const [newConversation, setNewConversation] = useState({
+        recipient_id: '',
+        message: ''
+    });
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const messagesEndRef = useRef(null);
+    const pollingRef = useRef(null);
 
     useEffect(() => {
-        fetchConversations();
-        // Poll for new messages every 30 seconds
-        const interval = setInterval(fetchConversations, 30000);
-        return () => clearInterval(interval);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    useEffect(() => {
-        if (selectedPartner) {
-            fetchMessages(selectedPartner.id);
+        if (user) {
+            fetchConversations();
+            fetchUsers();
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedPartner]);
+
+        // Set up polling for new messages
+        const interval = setInterval(() => {
+            if (user) fetchConversations();
+        }, 10000); // Poll every 10 seconds
+        return () => clearInterval(interval);
+    }, [user]);
+
+    useEffect(() => {
+        if (selectedConversation) {
+            fetchMessages(selectedConversation.id);
+            startLongPolling(selectedConversation.id);
+        }
+
+        return () => {
+            if (pollingRef.current) {
+                clearTimeout(pollingRef.current);
+            }
+        };
+    }, [selectedConversation]);
+
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages]);
+
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
 
     const fetchConversations = async () => {
+        if (!user) return;
+
         try {
-            const response = await axios.get('http://127.0.0.1:8000/api/messages/conversations/');
-            setConversations(response.data);
-        } catch (error) {
-            console.error('Error fetching conversations:', error);
+            const token = localStorage.getItem('access_token'); // Changed from 'token' to 'access_token'
+            const response = await fetch('http://127.0.0.1:8000/api/messages/conversations/', {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setConversations(data);
+            } else {
+                setError('Failed to fetch conversations');
+            }
+        } catch (err) {
+            setError('Error loading conversations');
         } finally {
             setLoading(false);
         }
     };
 
-    const fetchMessages = async (partnerId) => {
-        try {
-            const response = await axios.get(`http://127.0.0.1:8000/api/messages/?partner=${partnerId}`);
-            setMessages(response.data.results || response.data);
+    const fetchUsers = async () => {
+        if (!user) return;
 
-            // Mark conversation as read
-            await axios.post(`http://127.0.0.1:8000/api/messages/conversation/${partnerId}/read/`);
-            fetchConversations(); // Refresh to update unread counts
-        } catch (error) {
-            console.error('Error fetching messages:', error);
+        try {
+            const token = localStorage.getItem('access_token'); // Changed from 'token' to 'access_token'
+            const response = await fetch('http://127.0.0.1:8000/api/auth/users/', {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                // Filter out current user
+                setUsers(data.results?.filter(u => u.id !== user.id) || []);
+            }
+        } catch (err) {
+            console.error('Error fetching users:', err);
         }
+    };
+
+    const fetchMessages = async (conversationId) => {
+        try {
+            const token = localStorage.getItem('access_token'); // Changed from 'token' to 'access_token'
+            const response = await fetch(`http://127.0.0.1:8000/api/messages/conversations/${conversationId}/`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setMessages(data.messages || data);
+
+                // Mark conversation as read
+                await fetch(`http://127.0.0.1:8000/api/messages/conversations/${conversationId}/read/`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                // Refresh conversations to update unread counts
+                fetchConversations();
+            }
+        } catch (err) {
+            console.error('Error fetching messages:', err);
+        }
+    };
+
+    const startLongPolling = (conversationId) => {
+        const poll = async () => {
+            try {
+                const token = localStorage.getItem('access_token');
+                const lastMessage = messages[messages.length - 1];
+                const lastMessageTime = lastMessage ? lastMessage.sent_at : new Date().toISOString();
+
+                const response = await fetch(
+                    `http://127.0.0.1:8000/api/messages/long-poll/${conversationId}/?last_message_time=${encodeURIComponent(lastMessageTime)}`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json',
+                        },
+                    }
+                );
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.has_new_messages && data.messages.length > 0) {
+                        setMessages(prev => {
+                            // Filter out messages that already exist
+                            const existingIds = new Set(prev.map(msg => msg.id));
+                            const newMessages = data.messages.filter(msg => !existingIds.has(msg.id));
+
+                            if (newMessages.length > 0) {
+                                return [...prev, ...newMessages];
+                            }
+                            return prev;
+                        });
+                        fetchConversations(); // Update conversation list
+                    }
+                }
+            } catch (err) {
+                console.error('Long polling error:', err);
+            }
+
+            // Continue polling
+            pollingRef.current = setTimeout(poll, 1000);
+        };
+
+        poll();
     };
 
     const handleSendMessage = async (e) => {
         e.preventDefault();
-        if (!newMessage.content.trim()) return;
+        if (!newMessage.trim() || !selectedConversation) return;
+
+        const messageContent = newMessage.trim();
+        setNewMessage(''); // Clear input immediately
 
         try {
-            await axios.post('http://127.0.0.1:8000/api/messages/', {
-                recipient: selectedPartner.id,
-                subject: newMessage.subject || 'No Subject',
-                content: newMessage.content
+            const token = localStorage.getItem('access_token');
+            const response = await fetch('http://127.0.0.1:8000/api/messages/', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    conversation_id: selectedConversation.id,
+                    content: messageContent
+                }),
             });
 
-            setNewMessage({ subject: '', content: '' });
-            fetchMessages(selectedPartner.id);
-        } catch (error) {
-            alert('Error sending message: ' + (error.response?.data?.detail || 'Unknown error'));
+            if (response.ok) {
+                const data = await response.json();
+                // Only add message if it's not already in the list
+                setMessages(prev => {
+                    const messageExists = prev.some(msg => msg.id === data.id);
+                    if (!messageExists) {
+                        return [...prev, data];
+                    }
+                    return prev;
+                });
+                fetchConversations(); // Update conversation list
+            } else {
+                const errorData = await response.json();
+                setError(errorData.error || 'Failed to send message');
+                setNewMessage(messageContent); // Restore message on error
+            }
+        } catch (err) {
+            setError('Error sending message');
+            setNewMessage(messageContent); // Restore message on error
         }
     };
 
-    if (loading) return <div className="container">Loading...</div>;
+    const handleStartConversation = async (e) => {
+        e.preventDefault();
+        if (!newConversation.recipient_id || !newConversation.message.trim()) return;
+
+        try {
+            const token = localStorage.getItem('access_token');
+            const response = await fetch('http://127.0.0.1:8000/api/messages/start-conversation/', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(newConversation),
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                setShowStartConversation(false);
+                setNewConversation({ recipient_id: '', message: '' });
+                fetchConversations();
+
+                // Select the new conversation
+                setTimeout(() => {
+                    const newConv = conversations.find(c => c.id === data.conversation_id);
+                    if (newConv) setSelectedConversation(newConv);
+                }, 500);
+            } else {
+                const errorData = await response.json();
+                setError(errorData.error || 'Failed to start conversation');
+            }
+        } catch (err) {
+            setError('Error starting conversation');
+        }
+    };
+
+    const handleClearChat = async () => {
+        if (!selectedConversation) return;
+
+        try {
+            const token = localStorage.getItem('access_token');
+            const response = await fetch(`http://127.0.0.1:8000/api/messages/conversations/${selectedConversation.id}/clear/`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (response.ok) {
+                setMessages([]);
+                setShowClearConfirm(false);
+                fetchConversations();
+            } else {
+                setError('Failed to clear chat');
+            }
+        } catch (err) {
+            setError('Error clearing chat');
+        }
+    };
+
+    if (loading) return <div className="messages-loading">Loading conversations...</div>;
+    if (!user) return <div className="messages-loading">Please log in to view messages.</div>;
 
     return (
-        <div className="container">
-            <h1>Messages</h1>
+        <div className="messages-page">
+            <div className="messages-header">
+                <h1>Messages</h1>
+                <button
+                    className="btn btn-primary"
+                    onClick={() => setShowStartConversation(true)}
+                >
+                    ✉️ New
+                </button>
+            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '20px', height: '600px' }}>
+            {error && <div className="error-message">{error}</div>}
+
+            <div className="messages-container">
                 {/* Conversations List */}
-                <div style={{
-                    backgroundColor: 'white',
-                    borderRadius: '12px',
-                    border: '1px solid #e0e0e0',
-                    overflow: 'auto'
-                }}>
-                    <div style={{ padding: '20px', borderBottom: '1px solid #e0e0e0' }}>
-                        <h3 style={{ margin: 0 }}>Conversations</h3>
+                <div className="conversations-sidebar">
+                    <div className="conversations-header">
+                        <h3>Conversations</h3>
                     </div>
-                    {conversations.length === 0 ? (
-                        <div style={{ padding: '40px 20px', textAlign: 'center', color: '#666' }}>
-                            <p style={{ fontSize: '36px', margin: '0 0 10px 0' }}>💬</p>
-                            <p>No conversations yet</p>
-                        </div>
-                    ) : (
-                        conversations.map(conv => (
-                            <div
-                                key={conv.id}
-                                onClick={() => setSelectedPartner(conv)}
-                                style={{
-                                    padding: '15px 20px',
-                                    borderBottom: '1px solid #f0f0f0',
-                                    cursor: 'pointer',
-                                    backgroundColor: selectedPartner?.id === conv.id ? '#f8f9ff' : 'white',
-                                    transition: 'background-color 0.2s'
-                                }}
-                                onMouseOver={(e) => {
-                                    if (selectedPartner?.id !== conv.id) {
-                                        e.currentTarget.style.backgroundColor = '#f8f9fa';
-                                    }
-                                }}
-                                onMouseOut={(e) => {
-                                    if (selectedPartner?.id !== conv.id) {
-                                        e.currentTarget.style.backgroundColor = 'white';
-                                    }
-                                }}
-                            >
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                                    <div style={{ flex: 1 }}>
-                                        <h4 style={{ margin: '0 0 5px 0', fontSize: '16px' }}>{conv.name}</h4>
-                                        <p style={{ margin: 0, fontSize: '14px', color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            {conv.last_message_preview}
-                                        </p>
-                                    </div>
-                                    {conv.unread_count > 0 && (
-                                        <span style={{
-                                            backgroundColor: '#667eea',
-                                            color: 'white',
-                                            borderRadius: '50%',
-                                            width: '24px',
-                                            height: '24px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            fontSize: '12px',
-                                            fontWeight: 'bold'
-                                        }}>
-                                            {conv.unread_count}
-                                        </span>
-                                    )}
-                                </div>
+
+                    <div className="conversations-list">
+                        {conversations.length === 0 ? (
+                            <div className="no-conversations">
+                                <p>💬</p>
+                                <p>No conversations yet</p>
+                                <button
+                                    className="btn btn-sm"
+                                    onClick={() => setShowStartConversation(true)}
+                                >
+                                    Start a conversation
+                                </button>
                             </div>
-                        ))
-                    )}
+                        ) : (
+                            conversations.map(conv => (
+                                <div
+                                    key={conv.id}
+                                    className={`conversation-item ${selectedConversation?.id === conv.id ? 'active' : ''}`}
+                                    onClick={() => setSelectedConversation(conv)}
+                                >
+                                    <div className="conversation-info">
+                                        <div className="conversation-header">
+                                            <h4>{conv.other_user_name}</h4>
+                                            {conv.unread_count > 0 && (
+                                                <span className="unread-badge">{conv.unread_count}</span>
+                                            )}
+                                        </div>
+                                        <p className="conversation-preview">{conv.last_message_preview}</p>
+                                        <div className="conversation-meta">
+                                            <span className="user-type">{conv.other_user_type}</span>
+                                            {conv.project_title && (
+                                                <span className="project-title">• {conv.project_title}</span>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
                 </div>
 
-                {/* Message Thread */}
-                <div style={{
-                    backgroundColor: 'white',
-                    borderRadius: '12px',
-                    border: '1px solid #e0e0e0',
-                    display: 'flex',
-                    flexDirection: 'column'
-                }}>
-                    {selectedPartner ? (
+                {/* Messages Area */}
+                <div className="messages-main">
+                    {selectedConversation ? (
                         <>
-                            {/* Header */}
-                            <div style={{ padding: '20px', borderBottom: '1px solid #e0e0e0' }}>
-                                <h3 style={{ margin: 0 }}>{selectedPartner.name}</h3>
-                                <p style={{ margin: '5px 0 0 0', fontSize: '14px', color: '#666' }}>
-                                    {selectedPartner.user_type}
-                                </p>
+                            {/* Messages Header */}
+                            <div className="messages-header-bar">
+                                <div className="conversation-details">
+                                    <h3>{selectedConversation.other_user_name}</h3>
+                                    <p>{selectedConversation.other_user_type}</p>
+                                    {selectedConversation.project_title && (
+                                        <p className="project-context">Project: {selectedConversation.project_title}</p>
+                                    )}
+                                </div>
+                                <button
+                                    className="clear-chat-btn"
+                                    onClick={() => setShowClearConfirm(true)}
+                                    title="Clear chat history"
+                                >
+                                    🗑️ Clear Chat
+                                </button>
                             </div>
 
-                            {/* Messages */}
-                            <div style={{ flex: 1, padding: '20px', overflowY: 'auto' }}>
+                            {/* Messages List */}
+                            <div className="messages-list">
                                 {messages.length === 0 ? (
-                                    <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+                                    <div className="no-messages">
                                         <p>No messages yet. Start the conversation!</p>
                                     </div>
                                 ) : (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-                                        {messages.slice().reverse().map(msg => (
-                                            <div
-                                                key={msg.id}
-                                                style={{
-                                                    alignSelf: msg.sender === currentUser?.id ? 'flex-end' : 'flex-start',
-                                                    maxWidth: '70%'
-                                                }}
-                                            >
-                                                <div style={{
-                                                    padding: '12px 16px',
-                                                    borderRadius: '12px',
-                                                    backgroundColor: msg.sender === currentUser?.id ? '#667eea' : '#f0f0f0',
-                                                    color: msg.sender === currentUser?.id ? 'white' : '#333'
-                                                }}>
-                                                    {msg.subject !== 'No Subject' && (
-                                                        <p style={{ margin: '0 0 8px 0', fontWeight: 'bold', fontSize: '14px' }}>
-                                                            {msg.subject}
-                                                        </p>
+                                    messages.map(message => (
+                                        <div
+                                            key={message.id}
+                                            className={`message ${message.sender === user.id ? 'sent' : 'received'}`}
+                                        >
+                                            <div className="message-content">
+                                                <p>{message.content}</p>
+                                                <div className="message-meta">
+                                                    <span className="message-time">
+                                                        {new Date(message.sent_at).toLocaleString()}
+                                                    </span>
+                                                    {message.sender === user.id && (
+                                                        <span className={`read-status ${message.is_read ? 'read' : 'unread'}`}>
+                                                            {message.is_read ? '✓✓' : '✓'}
+                                                        </span>
                                                     )}
-                                                    <p style={{ margin: 0 }}>{msg.content}</p>
-                                                    <p style={{
-                                                        margin: '8px 0 0 0',
-                                                        fontSize: '12px',
-                                                        opacity: 0.7
-                                                    }}>
-                                                        {new Date(msg.sent_at).toLocaleString()}
-                                                    </p>
                                                 </div>
                                             </div>
-                                        ))}
-                                    </div>
+                                        </div>
+                                    ))
                                 )}
+                                <div ref={messagesEndRef} />
                             </div>
 
                             {/* Send Message Form */}
-                            <form onSubmit={handleSendMessage} style={{ padding: '20px', borderTop: '1px solid #e0e0e0' }}>
-                                <input
-                                    type="text"
-                                    placeholder="Subject (optional)"
-                                    value={newMessage.subject}
-                                    onChange={(e) => setNewMessage({ ...newMessage, subject: e.target.value })}
-                                    style={{
-                                        width: '100%',
-                                        padding: '10px',
-                                        border: '1px solid #ddd',
-                                        borderRadius: '8px',
-                                        marginBottom: '10px'
-                                    }}
-                                />
-                                <div style={{ display: 'flex', gap: '10px' }}>
+                            <form onSubmit={handleSendMessage} className="send-message-form">
+                                <div className="message-input-container">
                                     <textarea
+                                        value={newMessage}
+                                        onChange={(e) => setNewMessage(e.target.value)}
                                         placeholder="Type your message..."
-                                        value={newMessage.content}
-                                        onChange={(e) => setNewMessage({ ...newMessage, content: e.target.value })}
-                                        required
-                                        rows="3"
-                                        style={{
-                                            flex: 1,
-                                            padding: '10px',
-                                            border: '1px solid #ddd',
-                                            borderRadius: '8px',
-                                            resize: 'none'
+                                        rows="2"
+                                        onKeyPress={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                handleSendMessage(e);
+                                            }
                                         }}
                                     />
-                                    <button
-                                        type="submit"
-                                        style={{
-                                            padding: '10px 20px',
-                                            backgroundColor: '#667eea',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '8px',
-                                            cursor: 'pointer',
-                                            fontWeight: '500'
-                                        }}
-                                    >
+                                    <button type="submit" className="send-button">
                                         Send
                                     </button>
                                 </div>
                             </form>
                         </>
                     ) : (
-                        <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            height: '100%',
-                            color: '#666'
-                        }}>
-                            <div style={{ textAlign: 'center' }}>
-                                <p style={{ fontSize: '48px', margin: '0 0 10px 0' }}>💬</p>
-                                <p>Select a conversation to start messaging</p>
+                        <div className="no-conversation-selected">
+                            <div className="placeholder-content">
+                                <p>💬</p>
+                                <h3>Select a conversation</h3>
+                                <p>Choose a conversation from the sidebar to start messaging</p>
                             </div>
                         </div>
                     )}
                 </div>
             </div>
+
+            {/* Start Conversation Modal */}
+            {showStartConversation && (
+                <div className="modal-overlay">
+                    <div className="modal">
+                        <div className="modal-header">
+                            <h3>Start New Conversation</h3>
+                            <button
+                                className="close-btn"
+                                onClick={() => setShowStartConversation(false)}
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleStartConversation} className="start-conversation-form">
+                            <div className="form-group">
+                                <label>Send message to:</label>
+                                <select
+                                    value={newConversation.recipient_id}
+                                    onChange={(e) => setNewConversation({ ...newConversation, recipient_id: e.target.value })}
+                                    required
+                                >
+                                    <option value="">Select a user</option>
+                                    {users.map(user => (
+                                        <option key={user.id} value={user.id}>
+                                            {user.first_name} {user.last_name} ({user.user_type})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="form-group">
+                                <label>Message:</label>
+                                <textarea
+                                    value={newConversation.message}
+                                    onChange={(e) => setNewConversation({ ...newConversation, message: e.target.value })}
+                                    placeholder="Type your message..."
+                                    rows="4"
+                                    required
+                                />
+                            </div>
+
+                            <div className="form-actions">
+                                <button type="button" onClick={() => setShowStartConversation(false)}>
+                                    Cancel
+                                </button>
+                                <button type="submit" className="btn btn-primary">
+                                    Start Conversation
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Clear Chat Confirmation Modal */}
+            {showClearConfirm && (
+                <div className="modal-overlay">
+                    <div className="modal confirm-modal">
+                        <div className="modal-header">
+                            <h3>Clear Chat History?</h3>
+                            <button
+                                className="close-btn"
+                                onClick={() => setShowClearConfirm(false)}
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div className="modal-body">
+                            <p>Are you sure you want to clear all messages in this conversation? This action cannot be undone.</p>
+                        </div>
+
+                        <div className="form-actions">
+                            <button
+                                type="button"
+                                onClick={() => setShowClearConfirm(false)}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                className="btn btn-danger"
+                                onClick={handleClearChat}
+                            >
+                                Clear Chat
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

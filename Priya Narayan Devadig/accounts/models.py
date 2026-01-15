@@ -69,3 +69,67 @@ class UserSkill(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.skill.name} ({self.proficiency_level})"
+
+
+class Notification(models.Model):
+    NOTIFICATION_TYPES = [
+        ('message', 'New Message'),
+        ('proposal_received', 'Proposal Received'),
+        ('proposal_accepted', 'Proposal Accepted'),
+        ('proposal_rejected', 'Proposal Rejected'),
+        ('contract_created', 'Contract Created'),
+        ('contract_completed', 'Contract Completed'),
+        ('review_received', 'Review Received'),
+        ('payment_received', 'Payment Received'),
+        ('system', 'System Notification'),
+    ]
+    
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES)
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    # Optional related objects
+    related_project = models.ForeignKey('projects.Project', on_delete=models.CASCADE, null=True, blank=True)
+    related_proposal = models.ForeignKey('proposals.Proposal', on_delete=models.CASCADE, null=True, blank=True)
+    related_contract = models.ForeignKey('contracts.Contract', on_delete=models.CASCADE, null=True, blank=True)
+    related_message = models.ForeignKey('messaging.Message', on_delete=models.CASCADE, null=True, blank=True)
+    related_review = models.ForeignKey('reviews.Review', on_delete=models.CASCADE, null=True, blank=True)
+    
+    # Action URL for frontend navigation
+    action_url = models.CharField(max_length=500, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.title} - {self.recipient.get_full_name()}"
+    
+    def mark_as_read(self):
+        self.is_read = True
+        self.save()
+
+
+class NotificationPreference(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='notification_preferences')
+    
+    # Email notifications
+    email_messages = models.BooleanField(default=True)
+    email_proposals = models.BooleanField(default=True)
+    email_contracts = models.BooleanField(default=True)
+    email_reviews = models.BooleanField(default=True)
+    email_payments = models.BooleanField(default=True)
+    email_system = models.BooleanField(default=True)
+    
+    # In-app notifications
+    inapp_messages = models.BooleanField(default=True)
+    inapp_proposals = models.BooleanField(default=True)
+    inapp_contracts = models.BooleanField(default=True)
+    inapp_reviews = models.BooleanField(default=True)
+    inapp_payments = models.BooleanField(default=True)
+    inapp_system = models.BooleanField(default=True)
+    
+    def __str__(self):
+        return f"{self.user.get_full_name()}'s Notification Preferences"

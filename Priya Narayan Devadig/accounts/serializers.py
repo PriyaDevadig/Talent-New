@@ -1,15 +1,22 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
-from .models import User, Profile, Skill, UserSkill
+from .models import User, Profile, Skill, UserSkill, Notification, NotificationPreference
 
 
-class UserRegistrationSerializer(serializers.ModelSerializer):
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'user_type', 'is_verified']
+        read_only_fields = ['id', 'is_verified']
+
+
+class UserCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True)
 
     class Meta:
         model = User
-        fields = ('email', 'username', 'first_name', 'last_name', 'user_type', 'password', 'password_confirm')
+        fields = ['username', 'email', 'password', 'password_confirm', 'first_name', 'last_name', 'user_type']
 
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:
@@ -22,7 +29,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         return user
 
 
-class UserLoginSerializer(serializers.Serializer):
+class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField()
 
@@ -37,7 +44,18 @@ class UserLoginSerializer(serializers.Serializer):
             if not user.is_active:
                 raise serializers.ValidationError('User account is disabled')
             attrs['user'] = user
+        else:
+            raise serializers.ValidationError('Must include email and password')
+
         return attrs
+
+
+class ProfileSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+
+    class Meta:
+        model = Profile
+        fields = '__all__'
 
 
 class SkillSerializer(serializers.ModelSerializer):
@@ -52,21 +70,26 @@ class UserSkillSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserSkill
-        fields = ('id', 'skill', 'skill_id', 'proficiency_level')
+        fields = ['id', 'skill', 'skill_id', 'proficiency_level']
 
 
-class ProfileSerializer(serializers.ModelSerializer):
-    user_skills = UserSkillSerializer(source='user.user_skills', many=True, read_only=True)
-
+class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Profile
-        fields = ('bio', 'profile_picture', 'location', 'phone_number', 'website', 
-                 'hourly_rate', 'availability_status', 'user_skills')
+        model = Notification
+        fields = [
+            'id', 'notification_type', 'title', 'message', 'is_read', 
+            'created_at', 'action_url', 'related_project', 'related_proposal',
+            'related_contract', 'related_message', 'related_review'
+        ]
+        read_only_fields = ['id', 'created_at']
 
 
-class UserSerializer(serializers.ModelSerializer):
-    profile = ProfileSerializer(read_only=True)
-
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
     class Meta:
-        model = User
-        fields = ('id', 'email', 'username', 'first_name', 'last_name', 'user_type', 'profile')
+        model = NotificationPreference
+        fields = [
+            'email_messages', 'email_proposals', 'email_contracts', 
+            'email_reviews', 'email_payments', 'email_system',
+            'inapp_messages', 'inapp_proposals', 'inapp_contracts',
+            'inapp_reviews', 'inapp_payments', 'inapp_system'
+        ]

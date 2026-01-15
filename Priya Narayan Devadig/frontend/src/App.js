@@ -15,6 +15,7 @@ import Contracts from './pages/Contracts';
 import Messages from './pages/Messages';
 import SubmitReview from './pages/SubmitReview';
 import Reviews from './pages/Reviews';
+import Notifications from './pages/Notifications';
 import PrivateRoute from './components/PrivateRoute';
 
 function App() {
@@ -104,6 +105,14 @@ function App() {
                             element={
                                 <PrivateRoute>
                                     <Reviews />
+                                </PrivateRoute>
+                            }
+                        />
+                        <Route
+                            path="/notifications"
+                            element={
+                                <PrivateRoute>
+                                    <Notifications />
                                 </PrivateRoute>
                             }
                         />

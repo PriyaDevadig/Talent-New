@@ -4,6 +4,12 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from .models import Proposal
 from .serializers import ProposalSerializer, ProposalCreateSerializer
+from accounts.notifications import (
+    notify_proposal_received, 
+    notify_proposal_accepted, 
+    notify_proposal_rejected,
+    notify_contract_created
+)
 
 
 class ProposalListCreateView(generics.ListCreateAPIView):
@@ -20,8 +26,13 @@ class ProposalListCreateView(generics.ListCreateAPIView):
         
         # Filter by project
         project_id = self.request.query_params.get('project', None)
-        if project_id:
-            queryset = queryset.filter(project_id=project_id)
+        if project_id and project_id != 'undefined':
+            try:
+                project_id = int(project_id)
+                queryset = queryset.filter(project_id=project_id)
+            except (ValueError, TypeError):
+                # Invalid project ID, return empty queryset
+                return queryset.none()
         
         # Filter by status
         proposal_status = self.request.query_params.get('status', None)
@@ -41,7 +52,10 @@ class ProposalListCreateView(generics.ListCreateAPIView):
         return queryset.order_by('-submitted_at')
 
     def perform_create(self, serializer):
-        serializer.save(freelancer=self.request.user)
+        proposal = serializer.save(freelancer=self.request.user)
+        
+        # Notify the client about the new proposal
+        notify_proposal_received(proposal.project.client, proposal)
 
 
 class ProposalDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -65,7 +79,7 @@ class ProposalDetailView(generics.RetrieveUpdateDestroyAPIView):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def accept_proposal(request, pk):
-    """Client accepts a proposal"""
+    """Client accepts a proposal and automatically creates a contract"""
     try:
         proposal = Proposal.objects.get(pk=pk, project__client=request.user)
         
@@ -79,16 +93,56 @@ def accept_proposal(request, pk):
         proposal.status = 'accepted'
         proposal.save()
         
-        # Reject other proposals for the same project
-        Proposal.objects.filter(
-            project=proposal.project
-        ).exclude(pk=pk).update(status='rejected')
+        # Notify freelancer about acceptance
+        notify_proposal_accepted(proposal.freelancer, proposal)
+        
+        # Reject other proposals for the same project and notify freelancers
+        other_proposals = Proposal.objects.filter(
+            project=proposal.project,
+            status='pending'
+        ).exclude(pk=pk)
+        
+        for other_proposal in other_proposals:
+            other_proposal.status = 'rejected'
+            other_proposal.save()
+            notify_proposal_rejected(other_proposal.freelancer, other_proposal)
         
         # Update project status
         proposal.project.status = 'in_progress'
         proposal.project.save()
         
-        return Response(ProposalSerializer(proposal).data)
+        # Automatically create contract
+        from contracts.models import Contract
+        from datetime import timedelta
+        from django.utils import timezone
+        
+        # Calculate end date based on proposal duration
+        end_date = timezone.now() + timedelta(days=proposal.estimated_duration)
+        
+        contract = Contract.objects.create(
+            project=proposal.project,
+            client=request.user,
+            freelancer=proposal.freelancer,
+            proposal=proposal,
+            agreed_budget=proposal.proposed_budget,
+            end_date=end_date,
+            terms_and_conditions=f"Contract for project: {proposal.project.title}\n"
+                                f"Agreed budget: ${proposal.proposed_budget}\n"
+                                f"Duration: {proposal.estimated_duration} days\n"
+                                f"Freelancer: {proposal.freelancer.get_full_name()}\n"
+                                f"Client: {request.user.get_full_name()}",
+            status='active'
+        )
+        
+        # Notify both parties about contract creation
+        notify_contract_created(request.user, proposal.freelancer, contract)
+        
+        # Return proposal data with contract info
+        response_data = ProposalSerializer(proposal).data
+        response_data['contract_created'] = True
+        response_data['contract_id'] = contract.id
+        
+        return Response(response_data)
     
     except Proposal.DoesNotExist:
         return Response(
@@ -112,6 +166,9 @@ def reject_proposal(request, pk):
         
         proposal.status = 'rejected'
         proposal.save()
+        
+        # Notify freelancer about rejection
+        notify_proposal_rejected(proposal.freelancer, proposal)
         
         return Response(ProposalSerializer(proposal).data)
     

@@ -54,7 +54,13 @@ const CreateProject = () => {
         try {
             const response = await axios.post('http://127.0.0.1:8000/api/projects/', formData);
             alert('Project created successfully!');
-            navigate(`/projects/${response.data.id}`);
+
+            // Navigate to the specific project if ID is available, otherwise to projects list
+            if (response.data && response.data.id) {
+                navigate(`/projects/${response.data.id}`);
+            } else {
+                navigate('/projects');
+            }
         } catch (error) {
             setError(error.response?.data?.detail || 'Error creating project');
         } finally {

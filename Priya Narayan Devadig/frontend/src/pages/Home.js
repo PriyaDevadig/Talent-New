@@ -6,7 +6,7 @@ const Home = () => {
     const { currentUser } = useAuth();
 
     return (
-        <div className="container">
+        <div className="container centered">
             <div style={{ textAlign: 'center', padding: '50px 0' }}>
                 <h1>Welcome to Freelance Marketplace</h1>
                 <p style={{ fontSize: '18px', marginBottom: '30px' }}>
