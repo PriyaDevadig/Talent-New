@@ -1,14 +1,18 @@
-# Render.com deployment configuration
 services:
-  # Backend API
   - type: web
     name: talentlink-backend
     env: python
-    buildCommand: "pip install -r requirements-production.txt && python manage.py collectstatic --noinput && python manage.py migrate"
-    startCommand: "gunicorn freelance_marketplace.wsgi:application"
+    pythonVersion: 3.10.12
+    rootDir: "Priya Narayan Devadig"
+
+    buildCommand: >
+      pip install -r requirements.txt &&
+      python manage.py collectstatic --noinput &&
+      python manage.py migrate
+
+    startCommand: gunicorn freelance_marketplace.wsgi:application
+
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.10.0
       - key: DJANGO_SETTINGS_MODULE
         value: freelance_marketplace.settings_production
       - key: SECRET_KEY
@@ -18,11 +22,11 @@ services:
           name: talentlink-db
           property: connectionString
       - key: DEBUG
-        value: False
-    
-  # PostgreSQL Database
+        value: "False"
+
   - type: pgsql
     name: talentlink-db
     databaseName: talentlink
     user: talentlink_user
     plan: starter
+
